@@ -1,0 +1,107 @@
+//@version=1
+//
+//  Based off of sherwind's ichimoku pine script
+//    https://gist.github.com/sherwind/2d091f18c72c1c1451165b203406be4e
+//  And off of ichimoku strategy by DataTrader
+//    https://www.youtube.com/watch?v=8blv0NdYeRc
+//
+//
+//   Buy only strategy
+//
+// -----------------------------------------------------------------------------
+// Copyright 2021 justinbcain
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// The GNU General Public License can be found here
+// <http://www.gnu.org/licenses/>.
+//
+// -----------------------------------------------------------------------------
+//
+
+strategy(title="Ichimoku Cloud and EMA strategy", shorttitle="Ichimoku/EMA Strategy", overlay=true, pyramiding=1, initial_capital=1200)
+
+donchian(len) => avg(lowest(len), highest(len))
+
+conversionPeriods   = input(9,  minval=1, title="Conversion Line Periods"),
+basePeriods         = input(26, minval=1, title="Base Line Periods")
+laggingSpan2Periods = input(52, minval=1, title="Lagging Span 2 Periods"),
+displacement        = input(1, minval=1, title="Displacement")
+emaPeriod           = input(50, minval=1, title="EMA Period")
+movingAverage       = ema(close, emaPeriod)
+
+usePSARTrailStop    = input(true, title="Use Parabolic SAR for Trailing Stop")
+useShorts           = input(false, title="Allow Short Trades")
+psarStart           = input(0.02, title="Parabolic SAR Start")
+psarIncrement       = input(0.02, title="Parabolic SAR Increment")
+psarMaximum         = input(0.2,  title="Parabolic SAR Maximum")
+
+conversionLine      = donchian(conversionPeriods)
+baseLine            = donchian(basePeriods)
+leadLine1           = avg(conversionLine, baseLine)
+leadLine2           = donchian(laggingSpan2Periods)
+leadLineDisp1       = leadLine1[displacement]
+leadLineDisp2       = leadLine2[displacement]
+psar                = sar(psarStart, psarIncrement, psarMaximum)
+dir                 = psar < close ? 1 : -1
+
+// BUY Signal:
+// close > leading span b and
+// leading span a > leading span b and
+// close crosses over base line and
+// close > parabolic sar
+buySignal = close > leadLineDisp2 and
+  close > leadLine1 and
+  close > movingAverage and
+  leadLineDisp1 > leadLineDisp2 and
+  close > psar
+
+closeSignal =  close < leadLine1 or
+  leadLineDisp1 < leadLineDisp2 or
+  close < movingAverage
+
+// Sell Signal:
+// close < leading span a and
+// leading span a < leading span b and
+// close crosses under base line and
+// close < psar
+sellSignal = close < leadLineDisp2 and
+  close < leadLine2 and
+  close < movingAverage and
+  leadLineDisp1 < leadLineDisp2 and
+  close < psar
+
+closeShortSignal =  close > leadLine2 or
+  leadLineDisp1 > leadLineDisp2 or
+  close > movingAverage
+
+
+hasLong  = strategy.position_size > 0
+hasShort = strategy.position_size < 0
+
+// Plot Indicator
+// SAR as dots, Lead, Lag, and Cloud fill for ichimoku
+// character Indicators for buy and sell
+
+plot(psar, style = cross, color = dir == -1 ? red : green)
+plot(movingAverage, color=yellow)
+leadPlot = plot(leadLine1, color = aqua, transp=90)
+lagPlot = plot(leadLine2, color = fuchsia, transp=90)
+fill(leadPlot, lagPlot, color=leadLine1 > leadLine2 ? green : red, transp=94)
+
+plotshape(not hasLong and buySignal ? low - 3000 : na, title="Buy Signal", location=location.absolute, style=shape.triangleup, size=size.small, color=green, textcolor=white, transp = 0)
+plotshape(hasLong and usePSARTrailStop and psar > close and dir == -1 and dir[1] == 1 ? high + 3000 : na, title="Sell Signal", location=location.absolute, style=shape.diamond, size=size.small, color=red, textcolor=white, transp = 0)
+
+strategy.entry("long", strategy.long, when = buySignal)
+strategy.exit("exit-long", "long", stop = psar, when = hasLong and usePSARTrailStop and psar > close and dir == -1 and dir[1] == 1)
+
+strategy.entry("short", strategy.short, when = sellSignal and useShorts)
+strategy.exit("exit-short", "short", stop = psar, when = hasShort and usePSARTrailStop)
